@@ -11,14 +11,7 @@ logging.basicConfig(format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s'
 api_id = 23190232
 api_hash = "4f9bdc4b8898f6b4e48cbb294b48b405"
 
-channels = [
-    'https://t.me/meduzalive', 'https://t.me/Ateobreaking', 'https://t.me/dvachannel', 'https://t.me/moscowmap',
-    'https://t.me/msk_live', 'https://t.me/mosmap', 'https://t.me/something_with_something_s'
-]  # откуда
-
-public_channels = []  # откуда, но только открытые
-
-sender = ''  # куда
+accounts = {}  # словарь аккаунтов и каналов для них
 
 KEYS = {
     # "ссылка:": "",
@@ -30,55 +23,70 @@ KEYS = {
 
 Bad_Keys = []
 
-tags = ''  # добавление текста к посту
+starter_called = False
+joiner_called = False
 
-starter_called = False  # keep track of whether starter function has been called
-
-
-async def is_public_channel(client, channel_link):
-    try:
-        entity = await client.get_entity(channel_link)
-        return entity.access_hash == 0
-    except ValueError:
-        return False
+client_ = TelegramClient('test', api_id, api_hash)
+print("~Activated~")
 
 
-async def join_public_channels():
-    print('~Joining the requested channels~')
-    async with TelegramClient('newline_bot', api_id, api_hash) as client:
-        for channel in channels:
-            if 1:  # await is_public_channel(client, channel):
-                print(channel)
-                public_channels.append(channel)
-                entity = await client.get_entity(channel)
-                await client(JoinChannelRequest(entity))
+async def join_channel(channel):
+    print(f'~Joining the requested channel ({channel})~')
+    entity = await client_.get_entity(channel)
+    await client_(JoinChannelRequest(entity))
     print('~Success~')
 
 
-client_ = TelegramClient('newline_bot', api_id, api_hash)
+def find_keys(dictionary, value):
+    keys_list = []
+    for key in dictionary:
+        if value in dictionary[key]:
+            keys_list.append(key)
+    return keys_list
 
 
-@client_.on(events.NewMessage)
+@client_.on(events.NewMessage(pattern='/start'))
 async def starter(event):
+    sender = await event.get_sender()
     global starter_called
-    # if isinstance(event.message.peer_id, PeerUser):
-    if '/start' in event.raw_text:
-        global sender
-        sender = await event.get_sender()
-        print(sender.username)
-        starter_called = True
-        await client_.send_message(sender, '~Activated~')
-        await client_.send_message(sender, 'Send me links to channels you want to see (in one message)')
+    if starter_called:
+        await client_.send_message(sender, 'Your account is already tracked')
+        return
+    print(f"This account is now tracked: {sender.username}")
+    starter_called = True
+    await client_.send_message(sender, '~Activated~')
+    accounts[sender.username] = []
+    await client_.send_message(sender, 'Now you can send me links of one in each message (https://...)')
 
 
-@client_.on(events.NewMessage(chats=public_channels))
+@client_.on(events.NewMessage(pattern=r"https://\S+"))
+async def channels_joiner(event_):
+    global starter_called
+    if starter_called:
+        global joiner_called
+        joiner_called = True
+        channel_name = event_.raw_text
+        await join_channel(channel_name)
+        sender = await event_.get_sender()
+        channels_ = accounts.get(sender.username)
+        channels_.append(channel_name)
+        accounts[sender.username] = channels_
+
+
+@client_.on(events.NewMessage(chats=list(accounts.values())))
 async def messages(event):
-    global starter_called  # check global variable
-    if starter_called:  # execute only after starter function is called
-        await client_.send_message(sender, event.message)
+    global starter_called
+    if starter_called and joiner_called:
+        reqs_chats = find_keys(accounts, event.get_sender())
+        for chat in reqs_chats:
+            tag = f"\n\n [{event.get_sender()}] | [@eazy_news]"
+            await client_.send_message(
+                entity=chat,
+                file=event.message.media,
+                message=event.raw_text + tag,
+                parse_mode='md',
+                link_preview=False)
 
 
-loop = asyncio.get_event_loop()
-loop.run_until_complete(join_public_channels())
 client_.start()
 client_.run_until_disconnected()
