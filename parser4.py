@@ -12,75 +12,99 @@ api_id = 23190232
 api_hash = "4f9bdc4b8898f6b4e48cbb294b48b405"
 
 accounts = {}  # словарь аккаунтов и каналов для них
+links = []
 
-KEYS = {
-    # "ссылка:": "",
-    # "Америка": "США",
-    # r"@\S+": "Максим",
-    # r"https://\S+": "",
-    # r"http://\S+": "",
-}
-
-Bad_Keys = []
-
-starter_called = False
-joiner_called = False
-
-client_ = TelegramClient('test', api_id, api_hash)
+client = TelegramClient('test1', api_id, api_hash)
 print("~Activated~")
 
 
 async def join_channel(channel):
-    print(f'~Joining the requested channel ({channel})~')
-    entity = await client_.get_entity(channel)
-    await client_(JoinChannelRequest(entity))
-    print('~Success~')
+    print(f'Joining the requested channel ({channel})')
+    try:
+        entity = await client.get_entity(channel)
+    except errors.FloodWaitError as e:
+        print('Flood for', e.seconds)
+    try:
+        await client(JoinChannelRequest(entity))
+    except errors.FloodWaitError as e:
+        print('Flood for', e.seconds)
+    print('Success')
 
 
-def find_keys(dictionary, value):
+async def find_keys(dictionary, value):
     keys_list = []
     for key in dictionary:
-        if value in dictionary[key]:
-            keys_list.append(key)
+        for item in dictionary[key]:
+            entity = await client.get_entity(item)
+            if entity == value:
+                keys_list.append(key)
     return keys_list
 
 
-@client_.on(events.NewMessage(pattern='/start'))
+def get_all_channels_link(dictionary):
+    values = []
+    for list_ in dictionary.values():
+        for value in list_:
+            if value not in values:
+                values.append(value)
+    return values
+
+
+async def get_all_channels_title(dictionary):
+    titles = []
+    for list_ in dictionary.values():
+        for value in list_:
+            entity = await client.get_entity(value)
+            if entity.title not in titles:
+                titles.append(entity.title)
+    return titles
+
+
+async def get_all_channels_id(dictionary):
+    ids = []
+    for list_ in dictionary.values():
+        for value in list_:
+            entity = await client.get_entity(value)
+            if entity.id not in ids:
+                ids.append(entity.id)
+    return ids
+
+
+@client.on(events.NewMessage(pattern='/start'))
 async def starter(event):
     sender = await event.get_sender()
-    global starter_called
-    if starter_called:
-        await client_.send_message(sender, 'Your account is already tracked')
+    if sender.username in accounts:
+        await client.send_message(sender, 'Your account is already tracked')
         return
     print(f"This account is now tracked: {sender.username}")
-    starter_called = True
-    await client_.send_message(sender, '~Activated~')
+    await client.send_message(sender, 'Your account is now tracked')
     accounts[sender.username] = []
-    await client_.send_message(sender, 'Now you can send me links of one in each message (https://...)')
+    await client.send_message(sender, 'Now you can send me links of one in each message (https://...)')
 
 
-@client_.on(events.NewMessage(pattern=r"https://\S+"))
-async def channels_joiner(event_):
-    global starter_called
-    if starter_called:
-        global joiner_called
-        joiner_called = True
-        channel_name = event_.raw_text
-        await join_channel(channel_name)
-        sender = await event_.get_sender()
+@client.on(events.NewMessage(pattern=r"https://\S+"))
+async def channels_joiner(event):
+    sender = await event.get_sender()
+    if sender.username in accounts:
+        channel_link = event.raw_text
+        await join_channel(channel_link)
         channels_ = accounts.get(sender.username)
-        channels_.append(channel_name)
+        channels_.append(channel_link)
         accounts[sender.username] = channels_
+        await client.send_message(sender, 'Successfully added a channel to the track list')
+        print(accounts)
+    else:
+        await client.send_message(sender, 'Your account is not tracked yet, firstly send me "/start"')
 
 
-@client_.on(events.NewMessage(chats=list(accounts.values())))
+@client.on(events.NewMessage())
 async def messages(event):
-    global starter_called
-    if starter_called and joiner_called:
-        reqs_chats = find_keys(accounts, event.get_sender())
-        for chat in reqs_chats:
-            tag = f"\n\n [{event.get_sender()}] | [@eazy_news]"
-            await client_.send_message(
+    sender = await event.get_sender()
+    if sender.id in await get_all_channels_id(accounts):
+        clients = await find_keys(accounts, await client.get_entity(sender))
+        for chat in clients:
+            tag = f"\n\n [{sender.title}] | [@eazy_news]"
+            await client.send_message(
                 entity=chat,
                 file=event.message.media,
                 message=event.raw_text + tag,
@@ -88,5 +112,5 @@ async def messages(event):
                 link_preview=False)
 
 
-client_.start()
-client_.run_until_disconnected()
+client.start()
+client.run_until_disconnected()
