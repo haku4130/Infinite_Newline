@@ -1,4 +1,5 @@
 from telethon import TelegramClient, events, errors, functions
+from telethon.errors import FloodWaitError
 from telethon.tl.functions.channels import JoinChannelRequest
 import asyncio
 import re
@@ -70,36 +71,64 @@ async def get_all_channels_id(dictionary):
     return ids
 
 
-@client.on(events.NewMessage(pattern='/start'))
-async def starter(event):
-    sender = await event.get_sender()
-    if sender.username in accounts:
-        await client.send_message(sender, 'Your account is already tracked')
-        return
-    print(f"This account is now tracked: {sender.username}")
-    await client.send_message(sender, 'Your account is now tracked')
-    accounts[sender.username] = []
-    await client.send_message(sender, 'Now you can send me links of one in each message (https://...)')
+async def safe_send_message(chat, message, **kwargs):
+    try:
+        await client.send_message(chat, message, **kwargs)
+    except FloodWaitError as e:
+        print(f"Возникла ошибка флуда. Ожидание {e.seconds} секунд.")
+        await asyncio.sleep(e.seconds)
+        await safe_send_message(client, chat, message, **kwargs)
 
 
-@client.on(events.NewMessage(pattern=r"https://\S+"))
-async def channels_joiner(event):
-    sender = await event.get_sender()
-    if sender.username in accounts:
-        channel_link = event.raw_text
-        await join_channel(channel_link)
-        channels_ = accounts.get(sender.username)
-        channels_.append(channel_link)
-        accounts[sender.username] = channels_
-        await client.send_message(sender, 'Successfully added a channel to the track list')
-        print(accounts)
-    else:
-        await client.send_message(sender, 'Your account is not tracked yet, firstly send me "/start"')
+# @client.on(events.NewMessage(pattern='/start'))
+# async def starter(event):
+#     sender = await event.get_sender()
+#     if sender.username in accounts:
+#         await client.send_message(sender, 'Your account is already tracked')
+#         return
+#     print(f"This account is now tracked: {sender.username}")
+#     await client.send_message(sender, 'Your account is now tracked')
+#     accounts[sender.username] = []
+#     await client.send_message(sender, 'Now you can send me links of one in each message (https://...)')
+
+
+# @client.on(events.NewMessage(pattern=r"https://\S+"))
+# async def channels_joiner(event):
+#     sender = await event.get_sender()
+#     if sender.username in accounts:
+#         channel_link = event.raw_text
+#         await join_channel(channel_link)
+#         channels_ = accounts.get(sender.username)
+#         channels_.append(channel_link)
+#         accounts[sender.username] = channels_
+#         await client.send_message(sender, 'Successfully added a channel to the track list')
+#         print(accounts)
+#     else:
+#         await client.send_message(sender, 'Your account is not tracked yet, firstly send me "/start"')
 
 
 @client.on(events.NewMessage())
 async def messages(event):
     sender = await event.get_sender()
+    if event.raw_text == '/start':
+        if sender.username in accounts:
+            await client.send_message(sender, 'Your account is already tracked')
+            return
+        print(f"This account is now tracked: {sender.username}")
+        await client.send_message(sender, 'Your account is now tracked')
+        accounts[sender.username] = []
+        await client.send_message(sender, 'Now you can send me links of one in each message (https://...)')
+    if event.raw_text == r"https://\S+":
+        if sender.username in accounts:
+            channel_link = event.raw_text
+            await join_channel(channel_link)
+            channels_ = accounts.get(sender.username)
+            channels_.append(channel_link)
+            accounts[sender.username] = channels_
+            await safe_send_message(sender, 'Successfully added a channel to the track list')
+            print(accounts)
+        else:
+            await client.send_message(sender, 'Your account is not tracked yet, firstly send me "/start"')
     if sender.id in await get_all_channels_id(accounts):
         clients = await find_keys(accounts, await client.get_entity(sender))
         for chat in clients:
