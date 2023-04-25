@@ -11,7 +11,9 @@ from telethon.errors import (
 import asyncio
 import re
 import logging
-from telethon.tl.types import PeerUser, Channel
+import numpy as np
+import gensim.downloader as api
+from sklearn.metrics.pairwise import cosine_similarity
 
 logging.basicConfig(format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s',
                     level=logging.WARNING)
@@ -20,10 +22,28 @@ api_id = 23190232
 api_hash = "4f9bdc4b8898f6b4e48cbb294b48b405"
 
 accounts = {}  # словарь аккаунтов и каналов для них
+posts = {}  # словарь аккаунтов и отправленных им постов
 links = []
+model = api.load("fasttext-wiki-news-subwords-300")
 
 client = TelegramClient('test', api_id, api_hash)
 print("~Activated~")
+
+
+def preprocess_text(text):
+    words = text.split()
+    words = [word for word in words if word in model.key_to_index]
+    return ' '.join(words)
+
+
+def text_similarity(text1, text2):
+    text1 = preprocess_text(text1)
+    text2 = preprocess_text(text2)
+    embeddings1 = np.array([model[word] for word in text1.split()])
+    embeddings2 = np.array([model[word] for word in text2.split()])
+    similarity_matrix = cosine_similarity(embeddings1, embeddings2)
+    similarity = np.mean(similarity_matrix)
+    return similarity
 
 
 async def find_keys(dictionary, value):
@@ -63,6 +83,15 @@ async def get_all_channels_id(dictionary):
             if entity.id not in ids:
                 ids.append(entity.id)
     return ids
+
+
+def was_post(posts_, new_post):
+    if not posts_:
+        return False
+    for post in posts_:
+        if text_similarity(post, new_post) > 0.7:
+            return True
+    return False
 
 
 async def join_channel(channel, user):
@@ -106,6 +135,7 @@ async def messages(event):
         print(f"This account is now tracked: {sender.username}")
         await client.send_message(sender, 'Your account is now tracked')
         accounts[sender.username] = []
+        posts[sender.username] = []
         await client.send_message(sender, 'Now you can send me links of one in each message (https://...)')
 
     elif re.match(r"https://\S+", event.raw_text):
@@ -122,20 +152,26 @@ async def messages(event):
     elif sender.id in await get_all_channels_id(accounts):
         clients = await find_keys(accounts, await client.get_entity(sender))
         for chat in clients:
-            tag = f"\n\n [{sender.title}] | [@eazy_news]"
-            if isinstance(event.message.media, (types.MessageMediaPhoto, types.MessageMediaDocument)):
-                await client.send_message(
-                    entity=chat,
-                    file=event.message.media,
-                    message=event.raw_text + tag,
-                    parse_mode='md',
-                    link_preview=False)
+            posts_ = posts[chat]
+            if not was_post(posts_, event.raw_text):
+                tag = f"\n\n [{sender.title}] | [@eazy_news]"
+                if isinstance(event.message.media, (types.MessageMediaPhoto, types.MessageMediaDocument)):
+                    await client.send_message(
+                        entity=chat,
+                        file=event.message.media,
+                        message=event.raw_text + tag,
+                        parse_mode='md',
+                        link_preview=False)
+                    posts[chat] = posts[chat].append(event.raw_text)
+                else:
+                    await client.send_message(
+                        entity=chat,
+                        message=event.raw_text + tag,
+                        parse_mode='md',
+                        link_preview=False)
+                    posts[chat] = posts[chat].append(event.raw_text)
             else:
-                await client.send_message(
-                    entity=chat,
-                    message=event.raw_text + tag,
-                    parse_mode='md',
-                    link_preview=False)
+                print("Caught a copyright")
 
     else:
         try:
