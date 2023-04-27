@@ -89,7 +89,9 @@ def was_post(posts_, new_post):
     if not posts_:
         return False
     for post in posts_:
-        if text_similarity(post, new_post) > 0.7:
+        sim = text_similarity(post, new_post)
+        print(sim)
+        if sim > 0.6:
             return True
     return False
 
@@ -152,8 +154,7 @@ async def messages(event):
     elif sender.id in await get_all_channels_id(accounts):
         clients = await find_keys(accounts, await client.get_entity(sender))
         for chat in clients:
-            posts_ = posts[chat]
-            if not was_post(posts_, event.raw_text):
+            if not was_post(posts[chat], event.raw_text):
                 tag = f"\n\n [{sender.title}] | [@eazy_news]"
                 if isinstance(event.message.media, (types.MessageMediaPhoto, types.MessageMediaDocument)):
                     await client.send_message(
@@ -162,14 +163,14 @@ async def messages(event):
                         message=event.raw_text + tag,
                         parse_mode='md',
                         link_preview=False)
-                    posts[chat] = posts[chat].append(event.raw_text)
+                    posts[chat].append(event.raw_text)
                 else:
                     await client.send_message(
                         entity=chat,
                         message=event.raw_text + tag,
                         parse_mode='md',
                         link_preview=False)
-                    posts[chat] = posts[chat].append(event.raw_text)
+                    posts[chat].append(event.raw_text)
             else:
                 print("Caught a copyright")
 
